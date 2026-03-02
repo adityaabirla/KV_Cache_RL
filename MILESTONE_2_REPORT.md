@@ -45,22 +45,6 @@ This milestone establishes the environment and baselines that the Milestone 3 RL
            └──────────┘   └─────────────┘   └─────────────────┘
 ```
 
-### 2.1 File Inventory
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| `__init__.py` | 4 | Package init; single source of truth for `DEFAULT_PROMPT` |
-| `model.py` | 108 | GPT-2 wrapper: `load_model()`, `generate_tokens()` generator |
-| `storage.py` | 210 | `SimulatedStorage`: 3-tier block store with injected eviction policy |
-| `lru.py` | 51 | LRU eviction (OrderedDict, move_to_end) |
-| `lfu.py` | 82 | LFU eviction (frequency buckets + LRU tie-break) |
-| `fifo.py` | 51 | FIFO eviction (insertion-order, access never reorders) |
-| `random_policy.py` | 65 | Random eviction (O(1) swap-and-pop, seeded RNG) |
-| `main.py` | 247 | Entry-point: runs all 4 policies, prints comparison |
-| `test_quick.py` | 88 | Quick integration test (LRU, tiny caps) |
-| `test_tiers.py` | 197 | Unit test + model integration test for all 3 tiers |
-| `requirements.txt` | 2 | `transformers>=4.38`, `torch>=2.1` |
-
 ---
 
 ## 3. Block Scheme
@@ -286,17 +270,8 @@ After step ~50, **all four policies** are reading from Disk because:
 
 ---
 
-## 8. Generated Text
 
-All four policies produce identical text (greedy decoding, deterministic):
-
-> The history of the Roman Empire is a fascinating one. The Roman Empire was founded by the Romans, and the Roman Empire was founded by the Romans. The Romans were the first to establish a state of war, and the Romans were the first to establish a state of peace. The Romans were the first to establish a state of war, and the Romans were the first to establish a state of peace. The Romans were the first to establish a state of war, and the Romans were the first to establish a state of peace. The Romans…
-
-The repetitive output is expected from GPT-2 Small with greedy decoding (no sampling, no temperature). Text quality is not the target of this milestone—correctness of the cache simulation is.
-
----
-
-## 9. How to Run
+## 8. How to Run
 
 ```bash
 # Activate environment
