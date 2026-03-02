@@ -105,7 +105,7 @@ When a block is read from a lower tier, it is **promoted back to GPU** (with an 
 
 ### 4.4 Virtual Latency (No Real Sleeping)
 
-All `time.sleep()` calls have been removed. Latency is tracked as a **virtual accumulator** (`storage.total_latency`), so the simulation runs at full speed (~1.5 s wall-clock for 100 tokens × 4 policies) while still producing meaningful simulated timing data.
+Latency is tracked as a **virtual accumulator** (`storage.total_latency`), so the simulation runs at full speed (~1.5 s wall-clock for 100 tokens × 4 policies) while still producing meaningful simulated timing data.
 
 ---
 
