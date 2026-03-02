@@ -24,24 +24,24 @@ This milestone establishes the environment and baselines that the Milestone 3 RL
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│                    main.py (entry-point)              │
+│                    main.py (entry-point)             │
 │  POLICIES registry → run_one() per policy → run()    │
-│  Comparison summary table at the end                  │
+│  Comparison summary table at the end                 │
 └────────────┬─────────────────────────┬───────────────┘
              │                         │
-     ┌───────▼───────┐       ┌────────▼────────┐
-     │   model.py    │       │   storage.py    │
-     │  GPT-2 wrapper│       │  SimulatedStorage│
-     │  token-by-     │       │  3-tier block    │
-     │  token generation│     │  store + stats   │
-     └───────────────┘       └───────┬──────────┘
+     ┌───────▼───────---┐       ┌────────▼────────-┐
+     │   model.py       │       │   storage.py     │
+     │  GPT-2 wrapper.  │       │  SimulatedStorage│
+     │  token-by-       │       │  3-tier block    │
+     │  token generation│       │  store + stats   │
+     └───────────────---┘       └───────┬──────────┘
                                      │ accepts any
                                      │ EvictionPolicy
                    ┌─────────────────┼───────────────────┐
-                   │                 │                    │
+                   │                 │                   │
            ┌───────▼──┐   ┌────────▼────┐   ┌──────────▼──────┐
-           │  lru.py   │   │  lfu.py     │   │ random_policy.py│
-           │  fifo.py  │   │             │   │                 │
+           │  lru.py  │   │  lfu.py     │   │ random_policy.py│
+           │  fifo.py │   │             │   │                 │
            └──────────┘   └─────────────┘   └─────────────────┘
 ```
 
@@ -333,50 +333,3 @@ DEFAULT_PROMPT = "The history of the Roman Empire is"
 ```
 
 This propagates to `main.py`, `model.py`, `test_quick.py`, and `test_tiers.py` automatically.
-
----
-
-## 10. Design Decisions & Trade-offs
-
-| Decision | Rationale |
-|----------|-----------|
-| **Protocol-based policy injection** | `storage.py` accepts any object satisfying `EvictionPolicy`. No inheritance needed. Future RL agent just needs `access()`, `evict()`, `remove()`. |
-| **Policy only tracks GPU-tier** | CPU→Disk eviction is always "oldest first" (FIFO within CPU). Only the GPU eviction decision is the learned/heuristic one. This simplifies the action space for the RL agent. |
-| **Blocks stored on CPU (`.cpu()`)** | KV tensors are copied off the MPS device before storage. Prevents GPU memory bloat; simulates the "data lives off-accelerator" scenario. |
-| **Greedy decoding only** | Eliminates randomness in token generation so all policies see the exact same token sequence. Apples-to-apples comparison. |
-| **No `time.sleep()`** | Virtual latency accumulator lets us run 100 tokens × 4 policies in ~6 seconds total wall-clock, while still producing meaningful simulated timing for comparison. |
-| **`seed=42` for Random** | Reproducible runs across experiments. |
-| **Prompt centralized in `__init__.py`** | Single source of truth avoids drift between files. |
-
----
-
-## 11. Milestone 2 → Milestone 3 Bridge
-
-This infrastructure is ready for the RL agent. The agent needs to:
-
-1. **Implement the `EvictionPolicy` protocol** — provide `access()`, `evict()`, `remove()`.
-2. **Observe state** — block access patterns, current tier occupancies, access frequencies.
-3. **Optimize for** — minimizing `total_latency` (the simulated time already tracked by `storage.total_latency`).
-4. **Beat the baselines** — the bar is set by Random at **850.75 s** simulated latency (for 100 tokens with default params).
-
-The modular design means the RL policy can be registered in the `POLICIES` dict in `main.py` with a single line:
-
-```python
-POLICIES["RL"] = lambda: RLPolicy(model_path="checkpoints/best.pt")
-```
-
----
-
-## 12. Summary of Changes Made in Milestone 2
-
-| Change | Files Modified |
-|--------|---------------|
-| Removed selective promotion (`hot_cutoff`) for pure textbook LRU | `main.py` |
-| Removed `time.sleep()`, added virtual latency tracking | `storage.py` |
-| Added LFU eviction policy | `lfu.py` (new) |
-| Added FIFO eviction policy | `fifo.py` (new) |
-| Added Random eviction policy | `random_policy.py` (new) |
-| Rewrote `main.py` for modular multi-policy architecture | `main.py` |
-| Added `POLICIES` registry, `run_one()`, `run()`, comparison table | `main.py` |
-| Centralized `DEFAULT_PROMPT` in `__init__.py` | `__init__.py`, `main.py`, `model.py`, `test_quick.py`, `test_tiers.py` |
-| Per-step CLI output: hit deltas, occupancy, simulated + wall time | `main.py` |
