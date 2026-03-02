@@ -1,7 +1,7 @@
 # Milestone 2 — KV-Cache Simulation Infrastructure
 
 **Project:** kv_cache_rl  
-**Date:** June 2025  
+**Date:** March 2026  
 **Environment:** Python 3.9, conda env `gpt2_env`, Apple Silicon (MPS)  
 **Model:** GPT-2 Small (124,439,808 parameters)
 
