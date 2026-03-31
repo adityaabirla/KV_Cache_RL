@@ -22,6 +22,37 @@ def _pick_device() -> torch.device:
     return torch.device("cpu")
 
 
+def _normalize_past_key_values(past_key_values):
+    """
+    Normalize HuggingFace KV cache across versions.
+
+    Returns:
+        tuple of (key, value) per layer
+    """
+    if past_key_values is None:
+        return None
+
+    # Convert DynamicCache → iterable
+    if not isinstance(past_key_values, (list, tuple)):
+        past_key_values = tuple(past_key_values)
+
+    normalized = []
+
+    for layer in past_key_values:
+        # Handles:
+        # (k, v)
+        # (k, v, extra)
+        if isinstance(layer, (list, tuple)):
+            k = layer[0]
+            v = layer[1]
+        else:
+            raise TypeError(f"Unexpected layer format: {type(layer)}")
+
+        normalized.append((k, v))
+
+    return tuple(normalized)
+
+
 # ── public API ───────────────────────────────────────────────────────
 
 def load_model(device: torch.device | None = None):
@@ -51,9 +82,9 @@ def generate_tokens(
 
     Yields
     ------
-    step : int          (0-based generation step)
-    token_id : int      (the chosen token)
-    past_key_values     (tuple of (key, value) per layer)
+    step : int
+    token_id : int
+    past_key_values : tuple[(k, v), ...]
     """
     if device is None:
         device = next(model.parameters()).device
@@ -69,22 +100,24 @@ def generate_tokens(
                 use_cache=True,
             )
 
-        logits = outputs.logits[:, -1, :]          # (batch, vocab)
-        next_token = torch.argmax(logits, dim=-1)   # greedy
+        logits = outputs.logits[:, -1, :]
+        next_token = torch.argmax(logits, dim=-1)
 
+        # Keep original cache for next iteration; normalize for caller
         past_key_values = outputs.past_key_values
+        normalized_cache = _normalize_past_key_values(outputs.past_key_values)
 
-        # Print shape once on the first step
+        # Print shape once
         if step == 0:
             print("\n[model] === KV-Cache shape (per layer) ===")
-            k0, v0 = past_key_values[0]
+            k0, v0 = normalized_cache[0]
             print(f"  key  : {k0.shape}   (batch, heads, seq_len, head_dim)")
             print(f"  value: {v0.shape}")
-            print(f"  layers: {len(past_key_values)}\n")
+            print(f"  layers: {len(normalized_cache)}\n")
 
-        yield step, next_token.item(), past_key_values
+        yield step, next_token.item(), normalized_cache
 
-        # Next iteration only needs the new token
+        # Next iteration: only feed last token
         input_ids = next_token.unsqueeze(0)
 
 
@@ -92,16 +125,21 @@ def generate_tokens(
 
 if __name__ == "__main__":
     model, tokenizer, device = load_model()
-    from kv_cache_rl import DEFAULT_PROMPT
-    prompt = DEFAULT_PROMPT
+
+    # fallback prompt (since you removed package import)
+    DEFAULT_PROMPT = "The future of artificial intelligence is"
+
     tokens = []
 
-    for step, tok, past in generate_tokens(model, tokenizer, prompt, 20, device):
+    for step, tok, past in generate_tokens(model, tokenizer, DEFAULT_PROMPT, 20, device):
         tokens.append(tok)
         if step < 3 or step % 10 == 0:
             seq_len = past[0][0].shape[2]
-            print(f"  step {step:>3d}  token={tokenizer.decode([tok])!r:>12s}  cache_seq_len={seq_len}")
+            print(
+                f"  step {step:>3d}  token={tokenizer.decode([tok])!r:>12s}  "
+                f"cache_seq_len={seq_len}"
+            )
 
     print("\n" + tokenizer.decode(
-        tokenizer.encode(prompt) + tokens
+        tokenizer.encode(DEFAULT_PROMPT) + tokens
     ))

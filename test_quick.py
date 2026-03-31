@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Quick end-to-end test with tiny latencies to validate the full pipeline."""
 
-from kv_cache_rl.lru import LRUPolicy
-from kv_cache_rl.model import generate_tokens, load_model
-from kv_cache_rl.storage import SimulatedStorage
+from lru import LRUPolicy
+from model import generate_tokens, load_model
+from storage import SimulatedStorage
 import time
 
 def _block_id(layer: int, position: int) -> str:
@@ -23,7 +23,7 @@ def main():
         verbose=False,
     )
 
-    from kv_cache_rl import DEFAULT_PROMPT
+    from __init__ import DEFAULT_PROMPT
     prompt = DEFAULT_PROMPT
     num_layers = model.config.n_layer
     max_new_tokens = 10

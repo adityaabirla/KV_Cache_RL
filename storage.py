@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from collections import OrderedDict
 from typing import Any, Protocol
-
+from importance_policy import ImportancePolicy
 
 # ── Eviction-policy interface ────────────────────────────────────────
 
@@ -116,37 +116,102 @@ class SimulatedStorage:
 
     def _evict_gpu_to_cpu(self) -> None:
         """Demote one block from GPU → CPU (using the policy)."""
-        victim = self.policy.evict()
+        # Pass GPU blocks as candidates so policy only chooses from actual GPU blocks
+        gpu_blocks = list(self.gpu.store.keys())
+        
+        # DEBUG: Log what we're passing
+        print(f"[DEBUG] Calling policy.evict with {len(gpu_blocks)} candidates")
+        print(f"[DEBUG] Policy type: {type(self.policy).__name__}")
+        
+        try:
+            victim = self.policy.evict(gpu_blocks)
+        except Exception as e:
+            # Re-raise with context
+            raise RuntimeError(
+                f"Policy.evict() failed with: {e}\n"
+                f"GPU had {len(gpu_blocks)} blocks"
+            ) from e
+        
+        print(f"[DEBUG] Policy returned victim: '{victim}'")
+        print(f"[DEBUG] Victim in gpu_blocks: {victim in gpu_blocks}")
+        
+        # Verify victim is in candidates list (the snapshot at call time)
+        if victim not in gpu_blocks:
+            # Check if it's in current GPU (in case something weird happened)
+            current_gpu = list(self.gpu.store.keys())
+            in_current = victim in current_gpu
+            
+            # Find what changed
+            added = [b for b in current_gpu if b not in gpu_blocks]
+            removed = [b for b in gpu_blocks if b not in current_gpu]
+            
+            print(f"[DEBUG] MISMATCH!")
+            print(f"[DEBUG]   Current GPU has: {len(current_gpu)} blocks")
+            print(f"[DEBUG]   Removed: {removed}")
+            print(f"[DEBUG]   Added: {added}")
+            
+            raise RuntimeError(
+                f"BUG: Policy returned victim '{victim}' not in candidates!\n"
+                f"Candidates passed to policy: {len(gpu_blocks)} blocks\n"
+                f"Victim in candidates snapshot: False\n"
+                f"Victim in current GPU: {in_current}\n"
+                f"Blocks removed during evict: {removed}\n"
+                f"Blocks added during evict: {added}"
+            )
+        
         data = self.gpu.pop(victim)
 
         if self.cpu.full:
             self._evict_cpu_to_disk()
 
         self.cpu.put(victim, data)
+        
+        # NOTIFY POLICY OF DEMOTION
+        if hasattr(self.policy, "notify_tier_change"):
+            self.policy.notify_tier_change(victim, 1) # 1 = CPU
+
         if self.verbose:
             print(f"    [storage] evict GPU→CPU  block={victim}  {self.gpu} {self.cpu}")
 
     def _evict_cpu_to_disk(self) -> None:
         """Demote the LRU block from CPU → Disk."""
-        # CPU eviction is always LRU among CPU-resident blocks
-        # (the policy only tracks GPU-resident blocks).
         victim, data = self.cpu.store.popitem(last=False)   # oldest
         self.disk.put(victim, data)
+        
+        # NOTIFY POLICY OF DEMOTION
+        if hasattr(self.policy, "notify_tier_change"):
+            self.policy.notify_tier_change(victim, 2) # 2 = Disk
+            
         if self.verbose:
             print(f"    [storage] evict CPU→Disk block={victim}  {self.cpu} {self.disk}")
 
-    def _promote_to_gpu(self, block_id: str, data: Any) -> None:
-        """Bring *block_id* into GPU, evicting if necessary."""
+    def _promote_to_gpu(self, block_id: str, data: Any, from_tier: int = 0) -> None:
+        """Move a block from a lower tier into the GPU."""
+        # 1. Make room if the GPU is full
         if self.gpu.full:
             self._evict_gpu_to_cpu()
+
+        # 2. Physically place the data in the GPU tier
         self.gpu.put(block_id, data)
-        self.policy.access(block_id)
+
+        # 3. Update the eviction policy
+        if hasattr(self.policy, "access"):
+            if isinstance(self.policy, ImportancePolicy):
+                # Record the MOVEMENT first (e.g., from CPU/Disk up to GPU)
+                if from_tier > 0:
+                    self.policy.notify_tier_change(block_id, 0)
+                
+                # Record the COMPUTATION now that it safely lives in the GPU
+                self.policy.access(block_id, tier=0)
+            else:
+                # Fallback for standard baseline policies (LRU, LFU, etc.)
+                self.policy.access(block_id)
 
     # ── public API ───────────────────────────────────────────────────
 
     def store(self, block_id: str, data: Any) -> None:
         """Insert a **new** block (e.g. freshly computed KV-cache slice)."""
-        self._promote_to_gpu(block_id, data)
+        self._promote_to_gpu(block_id, data, from_tier=0)
 
     def get_data(self, block_id: str, promote: bool = True) -> Any:
         """
@@ -162,17 +227,24 @@ class SimulatedStorage:
         # --- GPU hit ---
         if block_id in self.gpu:
             self.gpu_hits += 1
-            self.policy.access(block_id)
+
+            if isinstance(self.policy, ImportancePolicy):
+                self.policy.access(block_id, tier=0)
+            else:
+                self.policy.access(block_id)
+
             return self.gpu.store[block_id]
 
         # --- CPU hit ---
         if block_id in self.cpu:
             self.cpu_hits += 1
             self.total_latency += self.cpu_latency
+
             if promote:
                 data = self.cpu.pop(block_id)
-                self._promote_to_gpu(block_id, data)
+                self._promote_to_gpu(block_id, data, from_tier=1)
             else:
+                # Cold read: don't pollute policy tracking
                 data = self.cpu.store[block_id]
             return data
 
@@ -180,10 +252,12 @@ class SimulatedStorage:
         if block_id in self.disk:
             self.disk_hits += 1
             self.total_latency += self.disk_latency
+
             if promote:
                 data = self.disk.pop(block_id)
-                self._promote_to_gpu(block_id, data)
+                self._promote_to_gpu(block_id, data, from_tier=2)
             else:
+                # Cold read: don't pollute policy tracking
                 data = self.disk.store[block_id]
             return data
 

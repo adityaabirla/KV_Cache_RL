@@ -29,8 +29,8 @@ def test_storage_unit():
          - Evictions cascade GPU→CPU→Disk.
       2. Read back specific blocks and assert the tier they come from.
     """
-    from kv_cache_rl.lru import LRUPolicy
-    from kv_cache_rl.storage import SimulatedStorage
+    from lru import LRUPolicy
+    from storage import SimulatedStorage
 
     policy = LRUPolicy()
     s = SimulatedStorage(
@@ -93,9 +93,9 @@ def test_model_mixed_hits():
 
     Latencies are set to 0.001 / 0.002 so the test finishes fast.
     """
-    from kv_cache_rl.lru import LRUPolicy
-    from kv_cache_rl.model import generate_tokens, load_model
-    from kv_cache_rl.storage import SimulatedStorage
+    from lru import LRUPolicy
+    from model import generate_tokens, load_model
+    from storage import SimulatedStorage
 
     model, tokenizer, device = load_model()
 
@@ -110,7 +110,7 @@ def test_model_mixed_hits():
     )
 
     num_layers = model.config.n_layer
-    from kv_cache_rl import DEFAULT_PROMPT
+    from __init__ import DEFAULT_PROMPT
     prompt = DEFAULT_PROMPT
     max_new_tokens = 15
 

@@ -30,10 +30,22 @@ class FIFOPolicy:
             self._order[block_id] = None
         # Intentionally no move_to_end — that's what makes it FIFO, not LRU.
 
-    def evict(self) -> str:
-        """Pop and return the oldest-inserted block_id."""
+    def evict(self, candidates: list[str] | None = None) -> str:
+        """Pop and return the oldest-inserted block_id.
+        
+        If candidates is provided, only consider blocks in that list."""
         if not self._order:
             raise RuntimeError("FIFOPolicy: nothing to evict (empty)")
+        
+        # Filter to only candidate blocks if provided
+        if candidates is not None:
+            # Iterate through _order (oldest first) and find first candidate
+            for block_id in list(self._order.keys()):
+                if block_id in candidates:
+                    del self._order[block_id]
+                    return block_id
+            raise RuntimeError(f"FIFOPolicy: no valid candidates to evict. candidates={candidates}, tracked={list(self._order.keys())}")
+        
         block_id, _ = self._order.popitem(last=False)
         return block_id
 

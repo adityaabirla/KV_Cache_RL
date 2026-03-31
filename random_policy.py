@@ -31,11 +31,23 @@ class RandomPolicy:
             self._index[block_id] = len(self._blocks)
             self._blocks.append(block_id)
 
-    def evict(self) -> str:
-        """Pop and return a random block_id (O(1) swap-and-pop)."""
+    def evict(self, candidates: list[str] | None = None) -> str:
+        """Pop and return a random block_id (O(1) swap-and-pop).
+        
+        If candidates is provided, only consider blocks in that list."""
         if not self._blocks:
             raise RuntimeError("RandomPolicy: nothing to evict (empty)")
-        idx = self._rng.randrange(len(self._blocks))
+        
+        # Filter to only candidate blocks if provided
+        if candidates is not None:
+            candidate_set = set(candidates)
+            valid_idxs = [i for i, bid in enumerate(self._blocks) if bid in candidate_set]
+            if not valid_idxs:
+                raise RuntimeError("RandomPolicy: no valid candidates to evict")
+            idx = self._rng.choice(valid_idxs)
+        else:
+            idx = self._rng.randrange(len(self._blocks))
+        
         # Swap with last element for O(1) removal
         last = self._blocks[-1]
         self._blocks[idx] = last

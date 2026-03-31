@@ -46,10 +46,27 @@ class LFUPolicy:
             self._freq_to_blocks[1][block_id] = None
             self._min_freq = 1
 
-    def evict(self) -> str:
-        """Pop and return the least-frequently-used block_id (LRU tie-break)."""
+    def evict(self, candidates: list[str] | None = None) -> str:
+        """Pop and return the least-frequently-used block_id (LRU tie-break).
+        
+        If candidates is provided, only consider blocks in that list."""
         if not self._freq:
             raise RuntimeError("LFUPolicy: nothing to evict (empty)")
+        
+        # Filter to only candidate blocks if provided
+        if candidates is not None:
+            candidate_set = set(candidates)
+            for freq in sorted(self._freq_to_blocks.keys()):
+                bucket = self._freq_to_blocks[freq]
+                for block_id in list(bucket.keys()):
+                    if block_id in candidate_set:
+                        bucket.pop(block_id)
+                        if not bucket:
+                            del self._freq_to_blocks[freq]
+                        del self._freq[block_id]
+                        return block_id
+            raise RuntimeError("LFUPolicy: no valid candidates to evict")
+        
         # Pop the oldest (LRU) block from the lowest-frequency bucket
         bucket = self._freq_to_blocks[self._min_freq]
         block_id, _ = bucket.popitem(last=False)
