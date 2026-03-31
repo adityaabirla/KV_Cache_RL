@@ -119,10 +119,6 @@ class SimulatedStorage:
         # Pass GPU blocks as candidates so policy only chooses from actual GPU blocks
         gpu_blocks = list(self.gpu.store.keys())
         
-        # DEBUG: Log what we're passing
-        print(f"[DEBUG] Calling policy.evict with {len(gpu_blocks)} candidates")
-        print(f"[DEBUG] Policy type: {type(self.policy).__name__}")
-        
         try:
             victim = self.policy.evict(gpu_blocks)
         except Exception as e:
@@ -132,8 +128,8 @@ class SimulatedStorage:
                 f"GPU had {len(gpu_blocks)} blocks"
             ) from e
         
-        print(f"[DEBUG] Policy returned victim: '{victim}'")
-        print(f"[DEBUG] Victim in gpu_blocks: {victim in gpu_blocks}")
+        #print(f"[DEBUG] Policy returned victim: '{victim}'")
+        #print(f"[DEBUG] Victim in gpu_blocks: {victim in gpu_blocks}")
         
         # Verify victim is in candidates list (the snapshot at call time)
         if victim not in gpu_blocks:
@@ -145,10 +141,10 @@ class SimulatedStorage:
             added = [b for b in current_gpu if b not in gpu_blocks]
             removed = [b for b in gpu_blocks if b not in current_gpu]
             
-            print(f"[DEBUG] MISMATCH!")
-            print(f"[DEBUG]   Current GPU has: {len(current_gpu)} blocks")
-            print(f"[DEBUG]   Removed: {removed}")
-            print(f"[DEBUG]   Added: {added}")
+            # print(f"[DEBUG] MISMATCH!")
+            # print(f"[DEBUG]   Current GPU has: {len(current_gpu)} blocks")
+            # print(f"[DEBUG]   Removed: {removed}")
+            # print(f"[DEBUG]   Added: {added}")
             
             raise RuntimeError(
                 f"BUG: Policy returned victim '{victim}' not in candidates!\n"

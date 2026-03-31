@@ -252,6 +252,49 @@ class ImportanceScorer:
         """Return the single best block to evict (lowest importance)."""
         ranked = self.rank_by_eviction_priority(blocks, current_step)
         return ranked[0][1]
+        
+    def update_weights_from_experience(
+        self,
+        feature_vector: np.ndarray,   # saved at eviction time
+        reward: float,
+        lr: float = 0.02,
+    ) -> None:
+        """
+        Online weight nudge from a deferred RL reward.
+
+        reward == 0  → perfect eviction (block never re-accessed), no update.
+        reward  < 0  → costly eviction (block was needed soon from CPU/Disk).
+                    We increase the weights for whichever signals were
+                    strongest in the wrongly-evicted block, so similar
+                    blocks score higher — and survive eviction — next time.
+
+        Feature-index → weight mapping (matches feature_vector layout):
+            [1] log(access_count), [7] log(freq)      → w_freq
+            [2] last_access,       [6] recency         → w_rec
+            [9] position                               → w_pos
+            [10] layer                                 → w_layer
+        """
+        if reward >= 0:
+            return   # good eviction — nothing to learn
+
+        penalty = abs(reward)
+
+        freq_signal  = (feature_vector[1] + feature_vector[7]) / 2.0
+        rec_signal   = (feature_vector[2] + feature_vector[6]) / 2.0
+        pos_signal   = float(feature_vector[9])
+        layer_signal = float(feature_vector[10])
+
+        self.w_freq  += lr * penalty * freq_signal
+        self.w_rec   += lr * penalty * rec_signal
+        self.w_pos   += lr * penalty * pos_signal
+        self.w_layer += lr * penalty * layer_signal
+
+        total = self.w_freq + self.w_rec + self.w_pos + self.w_layer
+        if total > 0:
+            self.w_freq  /= total
+            self.w_rec   /= total
+            self.w_pos   /= total
+            self.w_layer /= total
 
 
 # ──────────────────────────────────────────────

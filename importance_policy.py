@@ -1,14 +1,22 @@
-from importance_scorer import BlockState, ImportanceScorer
-
+# top of file — change the import
+from importance_scorer import BlockState, ImportanceScorer, RLReward
+import numpy as np
 
 class ImportancePolicy:
     def __init__(self, num_layers=12, seq_len=2048):
         self.scorer = ImportanceScorer(num_layers, seq_len)
+        self.reward_signal = RLReward()
 
-        self.blocks = {}       # str block_id -> BlockState
-        self._id_to_str = {}   # int block_id -> str block_id  (reverse lookup)
+        self.blocks = {}
+        self._id_to_str = {}
         self.step = 0
         self.next_id = 0
+
+        # block_id (int) → feature_vector captured at eviction time
+        self._eviction_snapshots: dict[int, np.ndarray] = {}
+
+        # running log of (feature_vector, reward) pairs — use for offline training
+        self.replay_buffer: list[tuple[np.ndarray, float]] = []
 
     # ── step counter ───────────────────────────
 
@@ -63,11 +71,17 @@ class ImportancePolicy:
 
         str_bid = self._id_to_str.get(evict_block.block_id)
         if str_bid is None:
-            # Fallback: use first candidate (fallback should map to string block_id)
             str_bid = candidates[0] if candidates else list(self.blocks.keys())[0]
 
-        # REMOVED: self.remove(str_bid) 
-        # We want to keep tracking it as it moves to CPU/Disk!
+        # ── NEW: open a reward ticket and save the feature snapshot ──────
+        self.reward_signal.record_eviction(evict_block, eviction_step=self.step)
+        self._eviction_snapshots[evict_block.block_id] = evict_block.feature_vector(
+            self.step,
+            self.scorer.num_layers,
+            self.scorer.seq_len,
+        )
+        # ─────────────────────────────────────────────────────────────────
+
         return str_bid
 
     def remove(self, block_id: str) -> None:
@@ -77,16 +91,30 @@ class ImportancePolicy:
             self._id_to_str.pop(block.block_id, None)
 
     def notify_tier_change(self, block_id: str, new_tier: int) -> None:
-        """
-        Called when storage moves a block between tiers (GPU→CPU, CPU→Disk, etc.)
-        so the importance scorer always sees the correct tier signal.
-        """
-        if block_id in self.blocks:
-            old_tier = self.blocks[block_id].tier
-            self.blocks[block_id].tier = new_tier
+        if block_id not in self.blocks:
+            return
 
-            if new_tier < old_tier:
-                self.blocks[block_id].num_promotions += 1
+        block = self.blocks[block_id]
+        old_tier = block.tier
+        block.tier = new_tier
+
+        if new_tier < old_tier:
+            block.num_promotions += 1
+
+        # ── NEW: resolve deferred reward on GPU promotion ─────────────────
+        if new_tier == 0 and old_tier > 0:
+            int_id = block.block_id
+            reward = self.reward_signal.resolve(
+                block_id=int_id,
+                retrieved_from_tier=old_tier,   # 1=CPU penalty, 2=Disk penalty
+                current_step=self.step,
+            )
+            if reward is not None:
+                fv = self._eviction_snapshots.pop(int_id, None)
+                if fv is not None:
+                    self.replay_buffer.append((fv, reward))
+                    self.scorer.update_weights_from_experience(fv, reward)
+    # ─────────────────────────────────────────────────────────────────
 
     # ── helper ─────────────────────────────────
 
@@ -99,3 +127,16 @@ class ImportancePolicy:
 
     def __len__(self):
         return len(self.blocks)
+    
+    def finalize(self) -> None:
+        """
+        Call once after generation ends.
+        Blocks that were evicted but never re-accessed get reward=0
+        (confirmed good eviction). Logs them to the replay buffer.
+        """
+        for int_id, reward in self.reward_signal.sweep_unreaccessed(self.step):
+            fv = self._eviction_snapshots.pop(int_id, None)
+            if fv is not None:
+                self.replay_buffer.append((fv, reward))
+                # reward=0 → no weight update, but the data is useful for
+                # offline training (positive examples of correct evictions)

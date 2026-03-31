@@ -163,7 +163,8 @@ def run_one(
                 f"step_sim={step_lat:.4f}s  total_sim={storage.total_latency:.4f}s  "
                 f"wall={elapsed:.2f}s"
             )
- 
+    if is_importance:
+        policy.finalize()  
     wall_total = time.perf_counter() - wall_start
  
     # Decoded text
